@@ -2,7 +2,7 @@
   * @file           lstm.cpp
   * @author         zhangshu(shu.zhang@intel.com)
   * @date           2017-11-25 10:50:08
-  * @brief          lstm forward computation
+  * @brief          lstm forward & backward computation
   *
   * @formula list:  [----------------------forward-----------------------]
   *                 i_t = sigmoid(w_xi * x_t + b_xi + w_hi * h_t-1 + b_hi)
@@ -36,30 +36,15 @@
   *                 db_xo = db_ho = do * [1,1,1...1].T 
   *
   **/
-#include <math.h>
+#include <cstddef>
 #include <mkl.h>
+#include <omp.h>
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
+extern "C" {
 inline float sigmoid(float x){
     return 1.0f / (1.0f + exp(-x));
-}
-void print(const float *array, int time_step, int row, int col)
-{
-    int i, j, k;
-    for(i = 0; i < time_step; ++i)
-    {
-        printf("timestep: %d\n", i);
-        for(j = 0; j < row; ++j)
-        {
-            for(k = 0; k < col; ++k)
-            {
-                printf("%f ", array[i * row * col + j * col + k]);
-            }
-            printf("\n");
-        }
-        printf("\n");
-    }
-
 }
 int get_workspace_size(const int T, const int N, const int D, const int H) {
  //   int forward_size = T * N * H * 4 + N * H;
@@ -80,14 +65,21 @@ int lstm_xw_forward(void* buf,
                     float* c_out,   //T*N*H
                     float* h_out    //T*N*H
                     ) {
-    //x*wx
-//    printf("x\n");
-//    print((float*)x, T, N, D);
-//    printf("wx\n");
-//    print(wx, 1, D, 4*H);
-//    printf("wh\n");
-//    print(wh, 1, H, 4*H);
-
+    #pragma omp parallel default(shared)
+    {
+        int ompTid = omp_get_thread_num();
+        int numomp = omp_get_num_threads();
+        int numprc = omp_get_num_procs();
+        int ompmax = omp_get_max_threads();
+        kmp_affinity_mask_t new_omp_mask;
+        kmp_create_affinity_mask(&new_omp_mask);
+        kmp_set_affinity_mask_proc(ompTid, &new_omp_mask);
+        kmp_set_affinity_mask_proc(ompTid + ompmax, &new_omp_mask);
+        if (kmp_set_affinity(&new_omp_mask) != 0)
+        {
+            printf("Error: kmp_set_affinity(%d, &new_omp_mask)\n", ompTid);
+        }
+    }
     MKL_INT gemm_m = T*N, gemm_n = 4*H, gemm_k = D;
     MKL_INT lda = gemm_k, ldb = gemm_n, ldc = gemm_n;
     cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, gemm_m, gemm_n, gemm_k, 1.0f, x, lda, wx, ldb, 0.0f, (float*)buf, ldc);
@@ -116,6 +108,7 @@ int lstm_xw_forward(void* buf,
     for (i = 0; i < gemm_m; i += N) {
         //h_t-1 * wh
         cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, N, gemm_n, gemm_k, 1.0f, h_pre, lda, wh, ldb, 0.0f, h_buf, ldc);
+        #pragma omp parallel for collapse(2)
         for (j = 0; j < N; ++j) {
             for (k = 0; k < H; ++k) {
                 ix[i+j][k] = sigmoid(ix[i+j][k] + ih[j][k] + bi[k]);
@@ -129,10 +122,7 @@ int lstm_xw_forward(void* buf,
         c_pre = c + i;
         h_pre = (float*)(h + i);
     } 
- //   printf("buf\n");
- //   print((float*)buf, 2*T, N, gemm_n);
- //   printf("h_out\n");
- //   print(h_out, T, N, H);
+    return 0;
 }
 
 int lstm_xw_backward(void* buf,
@@ -156,7 +146,24 @@ int lstm_xw_backward(void* buf,
                      float* dc0,     //N*H
                      float* dh0      //N*H
                      ) {
+    #pragma omp parallel default(shared)
+    {
+        int ompTid = omp_get_thread_num();
+        int numomp = omp_get_num_threads();
+        int numprc = omp_get_num_procs();
+        int ompmax = omp_get_max_threads();
+        kmp_affinity_mask_t new_omp_mask;
+        kmp_create_affinity_mask(&new_omp_mask);
+        kmp_set_affinity_mask_proc(ompTid, &new_omp_mask);
+        kmp_set_affinity_mask_proc(ompTid + ompmax, &new_omp_mask);
+        if (kmp_set_affinity(&new_omp_mask) != 0)
+        {
+            printf("Error: kmp_set_affinity(%d, &new_omp_mask)\n", ompTid);
+        }
+    }
     MKL_INT gemm_m = T * N, gemm_n = 4 * H;
+    memset(dwh, 0, sizeof(float) * H * gemm_n);
+    memset(db, 0, sizeof(float) * gemm_n);
     float (*it)[gemm_n] = (float(*)[gemm_n])buf;
     float (*gt)[gemm_n] = (float(*)[gemm_n])((float*)it + H);
     float (*ft)[gemm_n] = (float(*)[gemm_n])((float*)gt + H);
@@ -173,14 +180,10 @@ int lstm_xw_backward(void* buf,
     //dc:[T*N, H] 
     float (*deta_c)[H] = (float(*)[H])(deta_i + gemm_m);
     float (*deta_h)[H] = (float(*)[H])dh0;
-//    printf("back_buf\n");
-//    print((float*)buf, 2*T, N, gemm_n);
     
     float tc = 0.0f;
-    memset(dwh, 0, sizeof(float) * H * gemm_n);
-    memset(db, 0, sizeof(float) * gemm_n);
-    float *gemm_a = NULL;
     for (i = gemm_m - N; i >= 0; i -= N) {
+        #pragma omp parallel for collapse(2)
         for (j = 0; j < N; ++j) {
             for (k = 0; k < H; ++k) {
                 tc = tanh(ct[i+j][k]);
@@ -214,25 +217,20 @@ int lstm_xw_backward(void* buf,
     }
     cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasTrans, gemm_m, D, gemm_n, 1.0f, (float*)(deta_i), gemm_n, wx, gemm_n, 0.0f, dx, D);
     cblas_sgemm(CblasRowMajor, CblasTrans, CblasNoTrans, D, gemm_n, gemm_m, 1.0f, x, D, (float*)(deta_i), gemm_n, 0.0f, dwx, gemm_n);
-    for(i = 0; i < gemm_m; ++i) {
-        for (j = 0; j < gemm_n; ++j) {
-            db[j] += deta_i[i][j];
+    #pragma omp parallel for collapse(2)
+    for(i = 0; i < gemm_n; ++i) {
+        for (j = 0; j < gemm_m; ++j) {
+            db[i] += deta_i[j][i];
         }
     }
-//    printf("dc\n");
-//    print((float*)deta_c, T, N, H);
-//    printf("dicfo\n");
-//    print((float*)deta_i, T, N, gemm_n);
-
-//    printf("dwx\n");
-//    print(dwx, 1, D, 4*H);
-//    printf("dwh\n");
-//    print(dwh, 1, H, 4*H);
-//    printf("db\n");
-//    print(db, 1, 1, 4*H);
-//    printf("dx\n");
-//    print(dx, T, N, D);
-
+ //   printf("dwx:\n");
+ //   print(dwx, 1, D, gemm_n);
+ //   printf("dwh:\n");
+ //   print(dwh, 1, H, gemm_n);
+ //   printf("db:\n");
+ //   print(db, 1, 1, gemm_n);
+ //   printf("dx:\n");
+ //   print(dx, T, D, H);
     return 0;
 }
-
+}

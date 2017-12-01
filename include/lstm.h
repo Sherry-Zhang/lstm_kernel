@@ -4,7 +4,10 @@
   * @date      2017-11-26 14:54:20
   * @brief
   **/
-void print(const float *array, int time_step, int row, int col);
+#pragma once
+#ifdef __cplusplus
+extern "C" {
+#endif
 int lstm_xw_forward(void* buf,
                     const int N,    //batch_size
                     const int T,    //time_step(seq_len)
@@ -41,3 +44,7 @@ int lstm_xw_backward(void* buf,
                      float* dh0      //N*H
                      );
 int get_workspace_size(const int T, const int N, const int D, const int H);
+
+#ifdef __cplusplus
+}
+#endif

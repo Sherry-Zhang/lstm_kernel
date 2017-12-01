@@ -5,13 +5,34 @@
   * @brief
   **/
 
+#include <lstm.h>
 #include <mkl.h>
 #include <stdio.h>
-#include "lstm.h"
-const int T = 2;    //time_step
-const int N = 2;    //batch_size
-const int D = 2;    //input_dim
-const int H = 2;    //hidden_dim
+#include <string.h>
+extern "C" {
+int T = 2;    //time_step
+int N = 2;    //batch_size
+int D = 2;    //input_dim
+int H = 2;    //hidden_dim
+void print(const float *array, int time_step, int row, int col)
+{
+    int i, j, k;
+    for(i = 0; i < time_step; ++i)
+    {
+        printf("timestep: %d\n", i);
+        for(j = 0; j < row; ++j)
+        {
+            for(k = 0; k < col; ++k)
+            {
+                printf("%f ", array[i * row * col + j * col + k]);
+            }
+            printf("\n");
+        }
+        printf("\n");
+    }
+
+}
+
 void random_fill(float *parray, int len)
 {
     int i;
@@ -32,6 +53,15 @@ void add(float *parray, float bias, int len)
 
 int main(int argc, char *argv[])
 {
+    if (argc != 5)
+    {
+        printf("Error args. You must input T, N, D, H.\n");
+        return -1;
+    }
+    int T = atoi(argv[1]);    //time_step
+    int N = atoi(argv[2]);    //batch_size
+    int D = atoi(argv[3]);    //input_dim
+    int H = atoi(argv[4]);    //hidden_dim
     void* buf = mkl_calloc(T*N*H*9, sizeof(float), 64);
     float *c_0 = (float*)mkl_calloc(N*H, sizeof(float), 64);
     float *h_0 = (float*)mkl_calloc(N*H, sizeof(float), 64);
@@ -61,18 +91,31 @@ int main(int argc, char *argv[])
     add(grad, 1, N*H);
 
     lstm_xw_forward(buf, N, T, D, H, x, c_0, h_0, wx, wh, bias, c_out, h_out);
-    printf("h_out:\n");
-    print(h_out, T, N, H);
-    printf("c_out:\n");
-    print(c_out, T, N, H);
+//    printf("h_out:\n");
+//    print(h_out, T, N, H);
+//    printf("c_out:\n");
+//    print(c_out, T, N, H);
     
     lstm_xw_backward(buf, N, T, D, H, x, c_0, h_0, wx, wh, bias, c_out, h_out, grad, dwx, dwh, db, dx, dc, dh);
+    double begin, end, dura;
+    int count = 100;
+    begin = dsecnd();
+    for(int i = 0; i < count; ++i) {
+        lstm_xw_forward(buf, N, T, D, H, x, c_0, h_0, wx, wh, bias, c_out, h_out);
+    }
+    end = dsecnd();
+    dura = (end-begin)/count;
+    printf("T=%d, N=%d, D=%d, H=%d\n",  T, N, D, H);
+    printf("Forward: dur=%.4f, SPS=%.4f\n", dura, N/dura);
+    begin = dsecnd();
+    for(int i = 0; i < count; ++i) {
+        lstm_xw_forward(buf, N, T, D, H, x, c_0, h_0, wx, wh, bias, c_out, h_out);
+        lstm_xw_backward(buf, N, T, D, H, x, c_0, h_0, wx, wh, bias, c_out, h_out, grad, dwx, dwh, db, dx, dc, dh);
+    }
+    end = dsecnd();
+    dura = (end-begin)/count;
+    printf("Forward+Backward: dur=%.4f, SPS=%.4f\n", dura, N/dura);
    
-    //check grad dh  
-    float *h_check = (float*)mkl_calloc(T*N*H, sizeof(float), 64);
-    float *c_check = (float*)mkl_calloc(T*N*H, sizeof(float), 64);
-    
-
     mkl_free(buf);
     mkl_free(h_0);
     mkl_free(c_0);
@@ -82,4 +125,12 @@ int main(int argc, char *argv[])
     mkl_free(bias);
     mkl_free(h_out);
     mkl_free(c_out);
+    mkl_free(grad);
+    mkl_free(dwx);
+    mkl_free(dwh);
+    mkl_free(db);
+    mkl_free(dx);
+    mkl_free(dc);
+    mkl_free(dh);
+}
 }

@@ -12,7 +12,7 @@ from tensorflow.python.ops import array_ops
 import intel_lstm
 
 #sizes = [[16, 50, 1024, 1024]]
-sizes = [[3, 9, 3, 3]]
+sizes = [[16, 10, 64, 64]]
 
 for size in sizes:
     g = tf.Graph()
@@ -40,8 +40,6 @@ for size in sizes:
     with tf.Session(graph=g) as sess:    
         sess.run(tf.global_variables_initializer())
         sess.run(tf_hout[-1])
-        print("tf_out1 = ")
-        print(sess.run(tf_hout[-1]))
 
         intel_cell = intel_lstm.LSTM(D, H)
         intel_cell.w_x, intel_cell.w_h = array_ops.split(tf_cell.weights[0], [D, H], 0)
@@ -52,17 +50,13 @@ for size in sizes:
         intel_train_op = optim.minimize(intel_cost)
         intel_opt = tf.train.GradientDescentOptimizer(0.01)
         intel_grad = intel_opt.compute_gradients(intel_cost)
-        
-        print("intel_out1 = ")
-        print(sess.run(intel_hout))
-        sess.run(intel_grad[0:3])
-    #    sess.run(intel_train_op)
-
-    #    sess.run(tf_train_op)
-    #    print("tf_out2 = ")
-    #    print(sess.run(tf_hout[-1]))
-    #    print("intel_out2 = ")
-    #    print(sess.run(intel_hout))
+        intel_tmp = [grad for (grad,v) in intel_grad]
+        intel_dw = intel_tmp[1] 
+        intel_db = intel_tmp[2] 
+        print("intel_dw=")
+        print(sess.run(intel_dw))
+        print("intel_db=")
+        print(sess.run(intel_db))
 
         print("tf_grad=")
         print(tf_grad)
@@ -70,8 +64,8 @@ for size in sizes:
         print(sess.run(tf_dw))
         print("tf_db=")
         print(sess.run(tf_db))
-        print("tf_dx=")
-        print(sess.run(tf_dx))
+   #     print("tf_dx=")
+   #     print(sess.run(tf_dx))
 
 
 
@@ -80,21 +74,13 @@ for size in sizes:
      #   print(intel_cell.w_x.eval())
      #   print(intel_cell.w_h.eval())
 
-   #     cmp_tf = tf.stack(tf_hout).eval()
-   #     cmp_intel = intel_hout.eval()
-   #     print("tf_out = ", cmp_tf)
-   #     print("intel_out = ", cmp_intel)
-   #     ret = np.allclose(cmp_tf, cmp_intel, 0.01, 1e-4)
-   #     print("Forward check = ", ret)
-
-   #     print("tf_weight=", tf_cell.weights[0].eval())
-   #     print("tf_bias=", tf_cell.weights[1].eval())
-   #     
-   #     intel_weight = array_ops.concat([intel_cell.w_x, intel_cell.w_h], 0).eval()
-   #     print("intel_weight=", intel_weight)
-   #     print("intel_bias=", intel_cell.bias.eval())
-
-   #     ret = np.allclose(tf_cell.weights[0].eval(), intel_weight, 0.01, 1e-4)
-   #     print("train weight check = ", ret)
-   #     ret = np.allclose(tf_cell.weights[1].eval(), intel_cell.bias.eval(), 0.01, 1e-4)
-   #     print("train bias check = ", ret)
+        cmp_tf = tf.stack(tf_hout).eval()
+        cmp_intel = intel_hout.eval()
+  #      print("tf_out = ", cmp_tf)
+  #      print("intel_out = ", cmp_intel)
+        ret = np.allclose(cmp_tf, cmp_intel, 0.01, 1e-4)
+        print("Forward check = ", ret)
+        ret = np.allclose(intel_dw.eval(), tf_dw.eval(), 0.01, 1e-4)
+        print("Train weight check = ", ret)
+        ret = np.allclose(intel_db.eval(), tf_db.eval(), 0.01, 1e-4)
+        print("Train bias check = ", ret)

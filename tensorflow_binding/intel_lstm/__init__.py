@@ -31,7 +31,6 @@ class LSTM(object):
 
 @ops.RegisterGradient("LstmForward")
 def _LstmBackward(op, grad_loss, _):
-    print("grad", grad_loss.eval())
     T, N, D = op.inputs[1].get_shape()
     _, H = op.inputs[2].get_shape()
     dwx, dwh, db, dx, dh0, dc0 = lstm_lib.lstm_backward(op.inputs[0], op.inputs[1], op.inputs[2], op.inputs[3], op.inputs[4], op.inputs[5], op.inputs[6], 
